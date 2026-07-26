@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# NOTE: this reuses the same requirements.txt as the backend for
+# simplicity (one dependency list, no risk of the two drifting out of
+# sync). The tradeoff is this image also installs backend-only packages
+# it never uses (fastapi, sqlalchemy, faiss-cpu, etc.), making it larger
+# than strictly necessary. A leaner setup would split into
+# requirements-backend.txt / requirements-frontend.txt -- worth doing
+# later if image size/build time becomes a real problem, not before.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY streamlit.py .
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "streamlit.py", "--server.address=0.0.0.0", "--server.port=8501"]

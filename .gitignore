@@ -1,0 +1,25 @@
+# Env / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Data that should never be committed (grows large, is per-environment)
+documents/*
+!documents/.gitkeep
+faiss_index/*
+!faiss_index/.gitkeep
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
