@@ -5,6 +5,7 @@
 __pycache__/
 *.pyc
 .venv/
+faiss_index/
 venv/
 *.egg-info/
 
