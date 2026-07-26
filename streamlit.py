@@ -5,7 +5,7 @@ Swagger's "Try it out" does. It never imports from `app/` or touches
 the database/FAISS directly.
 
 Run the backend first:  uvicorn app.main:app --reload
-Then run this:           streamlit run streamlit_app.py
+Then run this:          streamlit run streamlit_app.py
 """
 
 import os
@@ -277,31 +277,27 @@ with tab_chat:
             unsafe_allow_html=True,
         )
 
-    if "last_spoken_id" not in st.session_state:
-        st.session_state.last_spoken_id = None
-
+    # Render past conversation history
     for entry in st.session_state.chat_log:
+        # User Question
         st.markdown(
             f"""<div class="msg-row user"><div class="bubble user">{entry['question']}</div></div>""",
             unsafe_allow_html=True,
         )
+        
+        # Audio Player (Displays BEFORE / WITH text response if audio exists)
+        if entry.get("audio_bytes"):
+            st.audio(entry["audio_bytes"], format="audio/mp3", autoplay=entry.get("autoplay", False))
+            # Turn off autoplay after first render so it doesn't replay on unrelated UI updates
+            entry["autoplay"] = False
+
+        # Assistant Answer
         st.markdown(
             f"""<div class="msg-row assistant"><div class="bubble assistant">{entry['answer']}</div></div>""",
             unsafe_allow_html=True,
         )
 
-        if entry.get("speak") and st.session_state.last_spoken_id != entry["chat_message_id"]:
-            with st.spinner("Generating voice reply..."):
-                audio_resp = requests.post(
-                    f"{st.session_state.api_url}/voice/speak",
-                    json={"text": entry["answer"]},
-                    timeout=30,
-                )
-            if audio_resp.ok:
-                st.audio(audio_resp.content, format="audio/mp3", autoplay=True)
-                st.session_state.last_spoken_id = entry["chat_message_id"]
-
-        if entry["sources"]:
+        if entry.get("sources"):
             with st.expander(f"{len(entry['sources'])} source(s)"):
                 for s in entry["sources"]:
                     st.markdown(f"**{s['filename']}**")
@@ -317,12 +313,18 @@ with tab_chat:
                 api("POST", "/feedback", json={"chat_message_id": entry["chat_message_id"], "rating": 1})
                 st.toast("Thanks for the feedback")
 
+    # Initialize dynamic recorder key in session state to prevent widget crash
+    if "recorder_key_counter" not in st.session_state:
+        st.session_state.recorder_key_counter = 0
+
     question_from_voice = None
     with st.container(border=True):
-        vcol1, vcol2 = st.columns([1, 4])
-        with vcol1:
-            st.markdown('<div class="section-label">Voice</div>', unsafe_allow_html=True)
-        audio_value = st.audio_input("Record a question", label_visibility="collapsed")
+        st.markdown('<div class="section-label">Voice</div>', unsafe_allow_html=True)
+        
+        # Dynamic key prevents "An error has occurred" on state reload
+        current_key = f"voice_input_{st.session_state.recorder_key_counter}"
+        audio_value = st.audio_input("Record a question", key=current_key, label_visibility="collapsed")
+        
         if audio_value is not None:
             if st.button("Transcribe & ask", type="primary"):
                 with st.spinner("Transcribing..."):
@@ -330,10 +332,16 @@ with tab_chat:
                     transcribed = api("POST", "/voice/transcribe", files=files)
                 question_from_voice = transcribed["text"]
                 st.caption(f'Heard: "{question_from_voice}"')
+                # Increment counter so next render mounts a fresh recorder widget
+                st.session_state.recorder_key_counter += 1
+        else:
+            st.caption("Click the microphone button to record your question.")
 
     question = st.chat_input("Ask a question about your documents...") or question_from_voice
+    
     if question:
-        with st.spinner("Searching documents..."):
+        with st.spinner("Searching documents & generating response..."):
+            # 1. Fetch text answer from RAG backend
             result = api(
                 "POST",
                 "/chat",
@@ -343,17 +351,33 @@ with tab_chat:
                     "document_id": selected_document_id,
                 },
             )
+            
+            # 2. If requested via voice, fetch audio response BEFORE appending to log & rerunning
+            generated_audio_bytes = None
+            if bool(question_from_voice):
+                try:
+                    audio_resp = requests.post(
+                        f"{st.session_state.api_url}/voice/speak",
+                        json={"text": result["answer"]},
+                        timeout=30,
+                    )
+                    if audio_resp.ok:
+                        generated_audio_bytes = audio_resp.content
+                except Exception as e:
+                    st.warning("Failed to generate voice playback.")
+
+        # 3. Store everything together so audio renders WITH text
         st.session_state.chat_log.append(
             {
                 "question": question,
                 "answer": result["answer"],
                 "sources": result["sources"],
                 "chat_message_id": result["chat_message_id"],
-                "speak": bool(question_from_voice),  # only auto-speak if THIS turn came from voice
+                "audio_bytes": generated_audio_bytes,
+                "autoplay": True,
             }
         )
         st.rerun()
-
 # ---------------------- Upload tab ----------------------
 with tab_upload:
     st.markdown('<div class="section-label">Upload a document</div>', unsafe_allow_html=True)

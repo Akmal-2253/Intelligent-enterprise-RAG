@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     postgres_db: str = "rag_system"
     postgres_user: str = "rag_user"
     postgres_password: str = "change_me"
+    postgres_sslmode: str = "disable"  # "require" for managed cloud Postgres (Neon, Supabase, etc.)
 
     # --- FAISS ---
     faiss_index_dir: str = "./faiss_index"
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
         return (
             f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"?sslmode={self.postgres_sslmode}"
         )
 
 
