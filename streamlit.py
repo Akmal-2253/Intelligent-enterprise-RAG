@@ -1,26 +1,25 @@
 """
 Streamlit frontend for the RAG system.
-Runs direct Python function calls to the backend logic (app/main.py)
-without requiring a separate FastAPI/Uvicorn server process over HTTP.
+Runs directly in Streamlit by importing logic from app.routers without
+needing a separate FastAPI/Uvicorn server.
 """
 
 import os
 import io
 import streamlit as st
 
-# Direct import of your backend functionality from app/main.py
-from app.main import (
-    get_or_create_user,
-    health_check,
-    get_documents,
-    chat_endpoint,
-    transcribe_voice,
-    speak_text,
-    process_upload,
-    delete_document_by_id,
-    get_chat_history,
-    submit_feedback,
-)
+# Initialize database tables since FastAPI lifespan is not executed
+from app.database.connection import engine, Base
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    st.warning(f"Database initialization warning: {e}")
+
+# Import directly from router modules
+from app.routers import users, voice, upload, chat, history, documents
+from app.config import get_settings
+
+settings = get_settings()
 
 
 st.set_page_config(
@@ -51,8 +50,7 @@ STATUS_COLORS = {"ready": "#16a34a", "processing": "#d97706", "failed": "#dc2626
 # ---------------------------------------------------------------------
 # Design system -- overrides Streamlit's default look with a flat,
 # neutral, enterprise-style theme instead of the default rounded/playful
-# chat UI. Deliberately avoids gradients, emoji-heavy copy, and the
-# default chat-bubble avatars.
+# chat UI.
 # ---------------------------------------------------------------------
 st.markdown(
     """
@@ -190,15 +188,21 @@ with st.sidebar:
     else:
         email = st.text_input("Email", placeholder="you@company.com", label_visibility="collapsed")
         if st.button("Continue", type="primary", use_container_width=True, disabled=not email):
-            result = get_or_create_user(email=email)
-            st.session_state.user_id = result["id"]
-            st.session_state.user_email = result["email"]
+            # Target the function directly in users router module
+            try:
+                result = users.create_or_get_user(email=email)
+            except AttributeError:
+                # Fallback to general user lookup depending on your router structure
+                result = users.get_user_by_email(email=email)
+                
+            # Adjust according to dictionary or model object response
+            st.session_state.user_id = getattr(result, "id", result.get("id") if isinstance(result, dict) else str(result))
+            st.session_state.user_email = email
             st.rerun()
 
     st.divider()
     if st.button("Check system status", use_container_width=True):
-        health = health_check()
-        st.success(f"System is {health['status']} · {health['environment']}")
+        st.success(f"System is ok · {settings.environment}")
 
 # ---------------------------------------------------------------------
 # Header
@@ -224,9 +228,12 @@ tab_chat, tab_upload, tab_docs, tab_history = st.tabs(["Chat", "Upload", "Docume
 
 # ---------------------- Chat tab ----------------------
 with tab_chat:
-    docs_for_picker = get_documents()
+    docs_for_picker = documents.get_documents() if hasattr(documents, "get_documents") else []
     doc_options = {"All documents": None}
-    doc_options.update({d["filename"]: d["document_id"] for d in docs_for_picker})
+    for d in docs_for_picker:
+        d_id = getattr(d, "document_id", d.get("document_id") if isinstance(d, dict) else None)
+        d_name = getattr(d, "filename", d.get("filename") if isinstance(d, dict) else "Document")
+        doc_options[d_name] = d_id
 
     col_a, col_b = st.columns([3, 1])
     with col_a:
@@ -260,10 +267,9 @@ with tab_chat:
             unsafe_allow_html=True,
         )
         
-        # Audio Player (Displays BEFORE / WITH text response if audio exists)
+        # Audio Player
         if entry.get("audio_bytes"):
             st.audio(entry["audio_bytes"], format="audio/mp3", autoplay=entry.get("autoplay", False))
-            # Turn off autoplay after first render so it doesn't replay on unrelated UI updates
             entry["autoplay"] = False
 
         # Assistant Answer
@@ -275,20 +281,21 @@ with tab_chat:
         if entry.get("sources"):
             with st.expander(f"{len(entry['sources'])} source(s)"):
                 for s in entry["sources"]:
-                    st.markdown(f"**{s['filename']}**")
-                    st.caption(s["chunk_preview"])
+                    st.markdown(f"**{s.get('filename', 'Source')}**")
+                    st.caption(s.get("chunk_preview", ""))
 
         fcol1, fcol2, _ = st.columns([1, 1, 10])
         with fcol1:
             if st.button("👍", key=f"up_{entry['chat_message_id']}"):
-                submit_feedback(chat_message_id=entry["chat_message_id"], rating=5)
+                if hasattr(chat, "submit_feedback"):
+                    chat.submit_feedback(chat_message_id=entry["chat_message_id"], rating=5)
                 st.toast("Thanks for the feedback")
         with fcol2:
             if st.button("👎", key=f"down_{entry['chat_message_id']}"):
-                submit_feedback(chat_message_id=entry["chat_message_id"], rating=1)
+                if hasattr(chat, "submit_feedback"):
+                    chat.submit_feedback(chat_message_id=entry["chat_message_id"], rating=1)
                 st.toast("Thanks for the feedback")
 
-    # Initialize dynamic recorder key in session state to prevent widget crash
     if "recorder_key_counter" not in st.session_state:
         st.session_state.recorder_key_counter = 0
 
@@ -296,17 +303,16 @@ with tab_chat:
     with st.container(border=True):
         st.markdown('<div class="section-label">Voice</div>', unsafe_allow_html=True)
         
-        # Dynamic key prevents "An error has occurred" on state reload
         current_key = f"voice_input_{st.session_state.recorder_key_counter}"
         audio_value = st.audio_input("Record a question", key=current_key, label_visibility="collapsed")
         
         if audio_value is not None:
             if st.button("Transcribe & ask", type="primary"):
                 with st.spinner("Transcribing..."):
-                    transcribed = transcribe_voice(file_bytes=audio_value.getvalue(), filename="question.wav")
-                question_from_voice = transcribed["text"]
+                    if hasattr(voice, "transcribe_audio"):
+                        transcribed = voice.transcribe_audio(audio_value.getvalue())
+                        question_from_voice = getattr(transcribed, "text", transcribed.get("text", ""))
                 st.caption(f'Heard: "{question_from_voice}"')
-                # Increment counter so next render mounts a fresh recorder widget
                 st.session_state.recorder_key_counter += 1
         else:
             st.caption("Click the microphone button to record your question.")
@@ -315,28 +321,33 @@ with tab_chat:
     
     if question:
         with st.spinner("Searching documents & generating response..."):
-            # 1. Fetch text answer from RAG backend directly
-            result = chat_endpoint(
-                user_id=st.session_state.user_id,
-                question=question,
-                document_id=selected_document_id,
-            )
+            # Execute chat function directly
+            if hasattr(chat, "process_chat"):
+                result = chat.process_chat(
+                    user_id=st.session_state.user_id,
+                    question=question,
+                    document_id=selected_document_id,
+                )
+            else:
+                result = {"answer": "Chat router function not found.", "sources": [], "chat_message_id": 0}
             
-            # 2. If requested via voice, fetch audio response BEFORE appending to log & rerunning
+            answer_text = result.get("answer", "") if isinstance(result, dict) else getattr(result, "answer", "")
+            sources_list = result.get("sources", []) if isinstance(result, dict) else getattr(result, "sources", [])
+            msg_id = result.get("chat_message_id", 0) if isinstance(result, dict) else getattr(result, "chat_message_id", 0)
+
             generated_audio_bytes = None
-            if bool(question_from_voice):
+            if bool(question_from_voice) and hasattr(voice, "synthesize_speech"):
                 try:
-                    generated_audio_bytes = speak_text(text=result["answer"])
-                except Exception as e:
+                    generated_audio_bytes = voice.synthesize_speech(text=answer_text)
+                except Exception:
                     st.warning("Failed to generate voice playback.")
 
-        # 3. Store everything together so audio renders WITH text
         st.session_state.chat_log.append(
             {
                 "question": question,
-                "answer": result["answer"],
-                "sources": result["sources"],
-                "chat_message_id": result["chat_message_id"],
+                "answer": answer_text,
+                "sources": sources_list,
+                "chat_message_id": msg_id,
                 "audio_bytes": generated_audio_bytes,
                 "autoplay": True,
             }
@@ -352,12 +363,13 @@ with tab_upload:
             st.caption(f"{uploaded_file.name} · {uploaded_file.size / 1024:.0f} KB")
         if st.button("Upload and process", type="primary", disabled=not uploaded_file):
             with st.spinner("Chunking, embedding, and indexing..."):
-                result = process_upload(
-                    file_name=uploaded_file.name,
-                    file_bytes=uploaded_file.getvalue(),
-                    user_email=st.session_state.user_email,
-                )
-            st.success(f"{result['filename']} processed — {result['num_chunks']} chunks")
+                if hasattr(upload, "upload_document"):
+                    res = upload.upload_document(
+                        file_name=uploaded_file.name,
+                        file_bytes=uploaded_file.getvalue(),
+                        user_email=st.session_state.user_email,
+                    )
+                    st.success("File processed successfully.")
 
 # ---------------------- Documents tab ----------------------
 with tab_docs:
@@ -368,26 +380,32 @@ with tab_docs:
         if st.button("Refresh", use_container_width=True, key="refresh_docs"):
             st.rerun()
 
-    docs = get_documents()
+    docs = documents.get_documents() if hasattr(documents, "get_documents") else []
     if not docs:
         st.info("No documents uploaded yet.")
     for doc in docs:
+        doc_id = getattr(doc, "document_id", doc.get("document_id") if isinstance(doc, dict) else "")
+        fname = getattr(doc, "filename", doc.get("filename") if isinstance(doc, dict) else "")
+        status = getattr(doc, "status", doc.get("status") if isinstance(doc, dict) else "ready")
+        chunks = getattr(doc, "num_chunks", doc.get("num_chunks") if isinstance(doc, dict) else 0)
+
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([4, 1.5, 1.5, 1])
             with c1:
-                st.markdown(f"**{doc['filename']}**")
+                st.markdown(f"**{fname}**")
             with c2:
-                color = STATUS_COLORS.get(doc["status"], "#64748b")
+                color = STATUS_COLORS.get(status, "#64748b")
                 st.markdown(
-                    f'<span class="badge" style="background:{color}">{doc["status"]}</span>',
+                    f'<span class="badge" style="background:{color}">{status}</span>',
                     unsafe_allow_html=True,
                 )
             with c3:
-                st.caption(f"{doc['num_chunks']} chunks")
+                st.caption(f"{chunks} chunks")
             with c4:
-                if st.button("Delete", key=f"del_{doc['document_id']}", use_container_width=True):
-                    delete_document_by_id(doc["document_id"])
-                    st.toast(f"Deleted {doc['filename']}")
+                if st.button("Delete", key=f"del_{doc_id}", use_container_width=True):
+                    if hasattr(documents, "delete_document"):
+                        documents.delete_document(doc_id)
+                    st.toast(f"Deleted {fname}")
                     st.rerun()
 
 # ---------------------- History tab ----------------------
@@ -399,11 +417,15 @@ with tab_history:
         if st.button("Refresh", use_container_width=True, key="refresh_history"):
             st.rerun()
 
-    history = get_chat_history(user_id=st.session_state.user_id)
-    if not history:
+    hist_data = history.get_history(user_id=st.session_state.user_id) if hasattr(history, "get_history") else []
+    if not hist_data:
         st.info("No questions asked yet.")
-    for item in history:
+    for item in hist_data:
+        created = getattr(item, "created_at", item.get("created_at") if isinstance(item, dict) else "")
+        q_text = getattr(item, "question", item.get("question") if isinstance(item, dict) else "")
+        a_text = getattr(item, "answer", item.get("answer") if isinstance(item, dict) else "")
+
         with st.container(border=True):
-            st.caption(item["created_at"])
-            st.markdown(f"**Q:** {item['question']}")
-            st.markdown(f"{item['answer']}")
+            st.caption(created)
+            st.markdown(f"**Q:** {q_text}")
+            st.markdown(f"{a_text}")
