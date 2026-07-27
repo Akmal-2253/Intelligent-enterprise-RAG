@@ -1,24 +1,27 @@
 """
-Streamlit frontend for the RAG system. This is a SEPARATE process from
-the FastAPI backend -- it talks to it purely over HTTP, exactly like
-Swagger's "Try it out" does. It never imports from `app/` or touches
-the database/FAISS directly.
-
-Run the backend first:  uvicorn app.main:app --reload
-Then run this:          streamlit run streamlit_app.py
+Streamlit frontend for the RAG system.
+Runs direct Python function calls to the backend logic (app/main.py)
+without requiring a separate FastAPI/Uvicorn server process over HTTP.
 """
 
 import os
-import requests
+import io
 import streamlit as st
 
+# Direct import of your backend functionality from app/main.py
+from app.main import (
+    get_or_create_user,
+    health_check,
+    get_documents,
+    chat_endpoint,
+    transcribe_voice,
+    speak_text,
+    process_upload,
+    delete_document_by_id,
+    get_chat_history,
+    submit_feedback,
+)
 
-# Config
-
-# Reads API_URL from the environment if set (e.g. "http://backend:8000"
-# inside Docker, where containers reach each other by service name, not
-# localhost) -- falls back to localhost for running this standalone.
-DEFAULT_API_URL = os.environ.get("API_URL", "http://127.0.0.1:8000")
 
 st.set_page_config(
     page_title="Enterprise Document Q&A",
@@ -27,34 +30,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-if "api_url" not in st.session_state:
-    st.session_state.api_url = DEFAULT_API_URL
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
 if "user_email" not in st.session_state:
     st.session_state.user_email = None
 if "chat_log" not in st.session_state:
     st.session_state.chat_log = []
-
-
-def api(method: str, path: str, **kwargs):
-    url = f"{st.session_state.api_url}{path}"
-    try:
-        resp = requests.request(method, url, timeout=60, **kwargs)
-    except requests.exceptions.ConnectionError:
-        st.error(
-            f"Can't reach the backend at {st.session_state.api_url}. "
-            "Is `uvicorn app.main:app --reload` running?"
-        )
-        st.stop()
-    if not resp.ok:
-        try:
-            detail = resp.json().get("detail", resp.text)
-        except Exception:
-            detail = resp.text
-        st.error(f"API error ({resp.status_code}): {detail}")
-        st.stop()
-    return resp.json()
 
 
 def initials(email: str) -> str:
@@ -183,12 +164,6 @@ st.markdown(
 # Sidebar
 # ---------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="section-label">Connection</div>', unsafe_allow_html=True)
-    st.session_state.api_url = st.text_input(
-        "Backend URL", value=st.session_state.api_url, label_visibility="collapsed"
-    )
-
-    st.divider()
     st.markdown('<div class="section-label">Account</div>', unsafe_allow_html=True)
 
     if st.session_state.user_id:
@@ -215,15 +190,15 @@ with st.sidebar:
     else:
         email = st.text_input("Email", placeholder="you@company.com", label_visibility="collapsed")
         if st.button("Continue", type="primary", use_container_width=True, disabled=not email):
-            result = api("POST", "/users", json={"email": email})
+            result = get_or_create_user(email=email)
             st.session_state.user_id = result["id"]
             st.session_state.user_email = result["email"]
             st.rerun()
 
     st.divider()
-    if st.button("Check backend status", use_container_width=True):
-        health = api("GET", "/health")
-        st.success(f"Backend is {health['status']} · {health['environment']}")
+    if st.button("Check system status", use_container_width=True):
+        health = health_check()
+        st.success(f"System is {health['status']} · {health['environment']}")
 
 # ---------------------------------------------------------------------
 # Header
@@ -249,7 +224,7 @@ tab_chat, tab_upload, tab_docs, tab_history = st.tabs(["Chat", "Upload", "Docume
 
 # ---------------------- Chat tab ----------------------
 with tab_chat:
-    docs_for_picker = api("GET", "/documents")
+    docs_for_picker = get_documents()
     doc_options = {"All documents": None}
     doc_options.update({d["filename"]: d["document_id"] for d in docs_for_picker})
 
@@ -306,11 +281,11 @@ with tab_chat:
         fcol1, fcol2, _ = st.columns([1, 1, 10])
         with fcol1:
             if st.button("👍", key=f"up_{entry['chat_message_id']}"):
-                api("POST", "/feedback", json={"chat_message_id": entry["chat_message_id"], "rating": 5})
+                submit_feedback(chat_message_id=entry["chat_message_id"], rating=5)
                 st.toast("Thanks for the feedback")
         with fcol2:
             if st.button("👎", key=f"down_{entry['chat_message_id']}"):
-                api("POST", "/feedback", json={"chat_message_id": entry["chat_message_id"], "rating": 1})
+                submit_feedback(chat_message_id=entry["chat_message_id"], rating=1)
                 st.toast("Thanks for the feedback")
 
     # Initialize dynamic recorder key in session state to prevent widget crash
@@ -328,8 +303,7 @@ with tab_chat:
         if audio_value is not None:
             if st.button("Transcribe & ask", type="primary"):
                 with st.spinner("Transcribing..."):
-                    files = {"file": ("question.wav", audio_value.getvalue(), "audio/wav")}
-                    transcribed = api("POST", "/voice/transcribe", files=files)
+                    transcribed = transcribe_voice(file_bytes=audio_value.getvalue(), filename="question.wav")
                 question_from_voice = transcribed["text"]
                 st.caption(f'Heard: "{question_from_voice}"')
                 # Increment counter so next render mounts a fresh recorder widget
@@ -341,28 +315,18 @@ with tab_chat:
     
     if question:
         with st.spinner("Searching documents & generating response..."):
-            # 1. Fetch text answer from RAG backend
-            result = api(
-                "POST",
-                "/chat",
-                json={
-                    "user_id": st.session_state.user_id,
-                    "question": question,
-                    "document_id": selected_document_id,
-                },
+            # 1. Fetch text answer from RAG backend directly
+            result = chat_endpoint(
+                user_id=st.session_state.user_id,
+                question=question,
+                document_id=selected_document_id,
             )
             
             # 2. If requested via voice, fetch audio response BEFORE appending to log & rerunning
             generated_audio_bytes = None
             if bool(question_from_voice):
                 try:
-                    audio_resp = requests.post(
-                        f"{st.session_state.api_url}/voice/speak",
-                        json={"text": result["answer"]},
-                        timeout=30,
-                    )
-                    if audio_resp.ok:
-                        generated_audio_bytes = audio_resp.content
+                    generated_audio_bytes = speak_text(text=result["answer"])
                 except Exception as e:
                     st.warning("Failed to generate voice playback.")
 
@@ -378,6 +342,7 @@ with tab_chat:
             }
         )
         st.rerun()
+
 # ---------------------- Upload tab ----------------------
 with tab_upload:
     st.markdown('<div class="section-label">Upload a document</div>', unsafe_allow_html=True)
@@ -387,9 +352,11 @@ with tab_upload:
             st.caption(f"{uploaded_file.name} · {uploaded_file.size / 1024:.0f} KB")
         if st.button("Upload and process", type="primary", disabled=not uploaded_file):
             with st.spinner("Chunking, embedding, and indexing..."):
-                files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
-                data = {"user_email": st.session_state.user_email}
-                result = api("POST", "/upload", files=files, data=data)
+                result = process_upload(
+                    file_name=uploaded_file.name,
+                    file_bytes=uploaded_file.getvalue(),
+                    user_email=st.session_state.user_email,
+                )
             st.success(f"{result['filename']} processed — {result['num_chunks']} chunks")
 
 # ---------------------- Documents tab ----------------------
@@ -401,7 +368,7 @@ with tab_docs:
         if st.button("Refresh", use_container_width=True, key="refresh_docs"):
             st.rerun()
 
-    docs = api("GET", "/documents")
+    docs = get_documents()
     if not docs:
         st.info("No documents uploaded yet.")
     for doc in docs:
@@ -419,7 +386,7 @@ with tab_docs:
                 st.caption(f"{doc['num_chunks']} chunks")
             with c4:
                 if st.button("Delete", key=f"del_{doc['document_id']}", use_container_width=True):
-                    api("DELETE", f"/document/{doc['document_id']}")
+                    delete_document_by_id(doc["document_id"])
                     st.toast(f"Deleted {doc['filename']}")
                     st.rerun()
 
@@ -432,7 +399,7 @@ with tab_history:
         if st.button("Refresh", use_container_width=True, key="refresh_history"):
             st.rerun()
 
-    history = api("GET", f"/history?user_id={st.session_state.user_id}")
+    history = get_chat_history(user_id=st.session_state.user_id)
     if not history:
         st.info("No questions asked yet.")
     for item in history:
