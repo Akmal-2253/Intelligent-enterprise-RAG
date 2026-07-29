@@ -1,25 +1,32 @@
+version: '3.8'
+
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  caddy:
+    image: caddy:latest
+    container_name: caddy
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
-      - "8000:8000"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./documents:/app/documents
-      - ./faiss_index:/app/faiss_index
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.streamlit
+    container_name: streamlit_frontend
     restart: unless-stopped
+    # Notice we removed ports: - "8501:8501" so it's hidden securely behind Caddy
+    expose:
+      - "8501"
     environment:
-      API_URL: http://backend:8000
-    depends_on:
-      - backend
-    ports:
-      - "8501:8501"
+      - PORT=8501
+
+volumes:
+  caddy_data:
+  caddy_config:
