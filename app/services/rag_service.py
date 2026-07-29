@@ -61,39 +61,48 @@ PROMPT = ChatPromptTemplate.from_messages(
 # normal retrieval -- only a bare "hi" on its own is treated as small talk.
 _SMALLTALK_RULES: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(r"^\s*(hi|hello|hey|hiya|yo|good (morning|afternoon|evening))[\s!.,]*$", re.IGNORECASE),
-        "Hey there! 👋 I'm your internal document assistant — ask me anything "
-        "about the company PDFs that have been uploaded (policies, manuals, "
-        "SOPs, contracts) and I'll answer using only what's actually in them.",
+        re.compile(r"\b(what are (you|u) (doing|up to)|what'?re (you|u) (doing|up to))\b", re.IGNORECASE),
+        "Just sitting here ready to dig through your uploaded documents! "
+        "Ask me something about a policy, manual, or contract and I'll "
+        "find the answer for you.",
     ),
     (
-        re.compile(r"\b(how are (you|u)|how'?s it going|what'?s up|how r u|hows u)\b", re.IGNORECASE),
-        "I'm doing well, thanks for asking! Ready whenever you are — what "
-        "would you like to know from the uploaded documents?",
+        re.compile(r"^\s*(ok|okay|cool|nice|great|awesome|got it|alright|sounds good)[\s!.,]*$", re.IGNORECASE),
+        "Great! Let me know whenever you have a question about the documents.",
     ),
     (
-        re.compile(
-            r"\b(what can you (do|help( me)? with|provide)|what do you do|"
-            r"who are you|what are you|how (do|can) (i|you) use (you|this)|"
-            r"what is this (app|tool|assistant|system))\b",
-            re.IGNORECASE,
-        ),
-        "I'm an AI assistant that answers questions using your company's "
-        "uploaded documents -- things like policies, manuals, SOPs, and "
-        "contracts. Upload a PDF and ask me anything about it; I'll only "
-        "answer from what's actually written there, and I'll say so if the "
-        "answer isn't in the documents rather than guessing. You can also "
-        "ask follow-up questions -- I keep track of the last few turns of "
-        "our conversation.",
+        re.compile(r"\b(who (made|built|created) you|who is your (creator|developer)|are you (an? )?ai|are you (a )?bot|are you human)\b", re.IGNORECASE),
+        "I'm an AI assistant built to answer questions about your company's "
+        "uploaded documents. I'm not human, but I'm pretty good at reading "
+        "policies and manuals so you don't have to!",
     ),
     (
-        re.compile(r"^\s*(thanks|thank you|thx|appreciate it)[\s!.,a-z]{0,25}$", re.IGNORECASE),
-        "You're welcome! Let me know if there's anything else you'd like to "
-        "check in the documents.",
+        re.compile(r"\b(can you (help|assist) me|i need help|help me( out)?)\b", re.IGNORECASE),
+        "Of course! I can answer questions about any of the documents "
+        "that have been uploaded -- just ask naturally, like you would ask "
+        "a colleague. For example: \"What's the leave policy?\" or "
+        "\"Summarize this document.\"",
     ),
     (
-        re.compile(r"^\s*(bye|goodbye|see you|see ya|later)[\s!.,]*$", re.IGNORECASE),
-        "Goodbye! Come back anytime you have a question about the documents.",
+        re.compile(r"\b(you (there|around)|anyone (there|around)|hello\?+)\b", re.IGNORECASE),
+        "Yep, I'm here! Go ahead and ask your question.",
+    ),
+    (
+        re.compile(r"^\s*(test|testing|123|hello world)[\s!.,]*$", re.IGNORECASE),
+        "Test received! I'm up and running. Ask me something about the "
+        "documents whenever you're ready.",
+    ),
+    (
+        re.compile(r"\b(i (don'?t|do not) know what to ask|what should i ask|any (suggestions|examples)|give me an example)\b", re.IGNORECASE),
+        "Good question! Try things like: \"What's the refund policy?\", "
+        "\"Summarize this document\", or \"What are the steps for "
+        "onboarding?\" -- anything that could plausibly be answered by "
+        "one of the uploaded documents.",
+    ),
+    (
+        re.compile(r"\b(i love (you|this)|you'?re (great|awesome|amazing|the best)|good (job|bot))\b", re.IGNORECASE),
+        "Thank you, that's kind! Happy to keep helping -- what would you "
+        "like to know from the documents?",
     ),
 ]
 
