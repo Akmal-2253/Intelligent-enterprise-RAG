@@ -8,6 +8,7 @@ changes, only different env values.
 """
 
 from functools import lru_cache
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
     postgres_user: str = "rag_user"
     postgres_password: str = "change_me"
     postgres_sslmode: str = "disable"  # "require" for managed cloud Postgres (Neon, Supabase, etc.)
+    
+    # Optional direct override for full database URLs (like Neon connection strings)
+    database_url_override: Optional[str] = None
 
     # --- FAISS ---
     faiss_index_dir: str = "./faiss_index"
@@ -55,10 +59,19 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 4
     conversation_history_turns: int = 3  # how many past Q&As to include as memory
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
     @property
     def database_url(self) -> str:
+        # If a direct DATABASE_URL was provided in .env, use it first
+        if self.database_url_override:
+            return self.database_url_override
+            
+        # Otherwise, construct it from individual parameters
         return (
             f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
