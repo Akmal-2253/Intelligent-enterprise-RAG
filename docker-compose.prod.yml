@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   caddy:
     image: caddy:latest
@@ -15,18 +13,56 @@ services:
     depends_on:
       - frontend
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backend_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    volumes:
+      - ./documents:/app/documents
+      - ./faiss_index:/app/faiss_index
+
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.streamlit
     container_name: streamlit_frontend
     restart: unless-stopped
-    # Notice we removed ports: - "8501:8501" so it's hidden securely behind Caddy
+    environment:
+      - API_URL=http://backend:8000
+      - PORT=8501
     expose:
       - "8501"
-    environment:
-      - PORT=8501
+    depends_on:
+      - backend
 
 volumes:
+  postgres_data:
   caddy_data:
   caddy_config:
