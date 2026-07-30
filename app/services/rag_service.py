@@ -61,6 +61,41 @@ PROMPT = ChatPromptTemplate.from_messages(
 # normal retrieval -- only a bare "hi" on its own is treated as small talk.
 _SMALLTALK_RULES: list[tuple[re.Pattern, str]] = [
     (
+        re.compile(r"^\s*(hi|hello|hey|hiya|yo|good (morning|afternoon|evening))[\s!.,]*$", re.IGNORECASE),
+        "Hey there! 👋 I'm your internal document assistant — ask me anything "
+        "about the company PDFs that have been uploaded (policies, manuals, "
+        "SOPs, contracts) and I'll answer using only what's actually in them.",
+    ),
+    (
+        re.compile(r"\b(how are (you|u)|how'?s it going|what'?s up|how r u|hows u)\b", re.IGNORECASE),
+        "I'm doing well, thanks for asking! Ready whenever you are — what "
+        "would you like to know from the uploaded documents?",
+    ),
+    (
+        re.compile(
+            r"\b(what can you (do|help( me)? with|provide)|what do you do|"
+            r"who are you|what are you|how (do|can) (i|you) use (you|this)|"
+            r"what is this (app|tool|assistant|system))\b",
+            re.IGNORECASE,
+        ),
+        "I'm an AI assistant that answers questions using your company's "
+        "uploaded documents -- things like policies, manuals, SOPs, and "
+        "contracts. Upload a PDF and ask me anything about it; I'll only "
+        "answer from what's actually written there, and I'll say so if the "
+        "answer isn't in the documents rather than guessing. You can also "
+        "ask follow-up questions -- I keep track of the last few turns of "
+        "our conversation.",
+    ),
+    (
+        re.compile(r"^\s*(thanks|thank you|thx|appreciate it)[\s!.,a-z]{0,25}$", re.IGNORECASE),
+        "You're welcome! Let me know if there's anything else you'd like to "
+        "check in the documents.",
+    ),
+    (
+        re.compile(r"^\s*(bye|goodbye|see you|see ya|later)[\s!.,]*$", re.IGNORECASE),
+        "Goodbye! Come back anytime you have a question about the documents.",
+    ),
+    (
         re.compile(r"\b(what are (you|u) (doing|up to)|what'?re (you|u) (doing|up to))\b", re.IGNORECASE),
         "Just sitting here ready to dig through your uploaded documents! "
         "Ask me something about a policy, manual, or contract and I'll "
