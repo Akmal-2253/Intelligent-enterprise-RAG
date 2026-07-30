@@ -40,7 +40,7 @@ if "chat_log" not in st.session_state:
 def api(method: str, path: str, **kwargs):
     url = f"{st.session_state.api_url}{path}"
     try:
-        resp = requests.request(method, url, timeout=60, **kwargs)
+        resp = requests.request(method, url, timeout=120, **kwargs)
     except requests.exceptions.ConnectionError:
         st.error(
             f"Can't reach the backend at {st.session_state.api_url}. "
