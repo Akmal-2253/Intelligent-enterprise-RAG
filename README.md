@@ -192,8 +192,4 @@ This brings up all three services (Caddy, backend, frontend) exactly as they run
 - **FastEmbed over a paid embedding API** — runs locally at no per-request cost, appropriate for a small-scale internal tool without high-volume embedding needs.
 - **Groq over other LLM providers** — chosen for very low inference latency, keeping the chat experience responsive.
 - **Neon over self-hosted Postgres** — removes database operations (backups, patching, SSL setup) from the deployment surface, which matters more on a resource-constrained single VM than the marginal cost of a managed service.
-<<<<<<< HEAD
 - **Small-talk pattern matching over LLM-based routing** — greetings and capability questions are matched via regex and answered instantly, avoiding unnecessary LLM calls and making the assistant's behavior for these cases fully predictable and free.
-=======
-- **Small-talk pattern matching over LLM-based routing** — greetings and capability questions are matched via regex and answered instantly, avoiding unnecessary LLM calls and making the assistant's behavior for these cases fully predictable and free.
->>>>>>> d3c6960 (Add project README)
