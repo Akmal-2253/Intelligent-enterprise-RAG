@@ -36,9 +36,15 @@ app = FastAPI(
 # CORS: allows a separate frontend (running on a different port/origin) to
 # call this API from the browser. Locked down to explicit origins rather
 # than "*" so it's not wide open even in dev.
+# Replace this line in app/main.py:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://rag-enterprise.duckdns.org",
+        "https://rag-enterprise.duckdns.org",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
