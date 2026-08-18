@@ -1,3 +1,0 @@
-rag-enterprise.duckdns.org {
-    reverse_proxy frontend:8501
-}
